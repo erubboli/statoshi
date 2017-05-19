@@ -1827,6 +1827,19 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
         }
     }
 
+    // BIP148 mandatory segwit signalling.
+    int64_t nMedianTimePast = pindex->GetMedianTimePast();
+    if ( (nMedianTimePast >= 1501545600) &&  // Tue 01 Aug 2017 00:00:00 UTC
+         (nMedianTimePast <= 1510704000) &&  // Wed 15 Nov 2017 00:00:00 UTC
+         (!IsWitnessLockedIn(pindex->pprev, chainparams.GetConsensus()) &&  // Segwit is not locked in
+          !IsWitnessEnabled(pindex->pprev, chainparams.GetConsensus())) )   // and is not active.
+    {
+        bool fVersionBits = (pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS;
+        bool fSegbit = (pindex->nVersion & VersionBitsMask(chainparams.GetConsensus(), Consensus::DEPLOYMENT_SEGWIT)) != 0;
+        if (!(fVersionBits && fSegbit)) {
+            return state.DoS(0, error("ConnectBlock(): relayed block must signal for segwit, please upgrade"), REJECT_INVALID, "bad-no-segwit");
+        }
+    }
     int64_t nTime1 = GetTimeMicros(); nTimeCheck += nTime1 - nTimeStart;
     LogPrint("bench", "    - Sanity checks: %.2fms [%.2fs]\n", 0.001 * (nTime1 - nTimeStart), nTimeCheck * 0.000001);
 
@@ -2890,6 +2903,13 @@ bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state, const 
         return state.DoS(50, false, REJECT_INVALID, "high-hash", false, "proof of work failed");
 
     return true;
+}
+
+// Check if Segregated Witness is Locked In
+bool IsWitnessLockedIn(const CBlockIndex* pindexPrev, const Consensus::Params& params)
+{
+    LOCK(cs_main);
+    return (VersionBitsState(pindexPrev, params, Consensus::DEPLOYMENT_SEGWIT, versionbitscache) == THRESHOLD_LOCKED_IN);
 }
 
 bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW, bool fCheckMerkleRoot)
